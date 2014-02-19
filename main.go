@@ -1,80 +1,117 @@
 package main
 
 import (
-	"crypto/tls"
-	"encoding/json"
-	"fmt"
-	"io/ioutil"
-	"log"
-	"net/http"
-	"os"
+    "crypto/tls"
+    "encoding/json"
+    "fmt"
+    "io/ioutil"
+    "log"
+    "net/http"
+    "os"
+    "net/url"
+
 )
 
 func main() {
-	fmt.Println("Stash to Jenkins")
+    fmt.Println("Stash to Jenkins")
 
-	stashUrl := os.Args[1]
-	stashUser := os.Args[2]
-	stashPwd := os.Args[3]
+    stashUrl := os.Args[1]
+    stashUser := os.Args[2]
+    stashPwd := os.Args[3]
 
-	project := os.Args[4]
+    project := os.Args[4]
 
-	repo := os.Args[5]
+    repo := os.Args[5]
 
-	//...fuck crapy certificate
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
+    jenkinsUrl := os.Args[6]
+    jenkinsUser := os.Args[7]
+    jenkinsPwd := os.Args[8]
 
-	client := &http.Client{Transport: tr}
+    job := os.Args[9]
 
-	// get the list of open pull requests
+    parameter := os.Args[10]
 
-	req, err := http.NewRequest("GET", stashUrl+"/rest/api/1.0/projects/"+project+"/repos/"+repo+"/pull-requests", nil)
+    //...fuck crapy certificate
+    tr := &http.Transport{
+        TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+    }
 
-	if err != nil {
-		log.Fatal(err)
-	}
+    client := &http.Client{Transport: tr}
 
-	req.SetBasicAuth(stashUser, stashPwd)
+    // get the list of open pull requests
 
-	resp, err := client.Do(req)
+    req, err := http.NewRequest("GET", stashUrl+"/rest/api/1.0/projects/"+project+"/repos/"+repo+"/pull-requests", nil)
 
-	if err != nil {
-		log.Fatal(err)
-	}
+    if err != nil {
+        log.Fatal(err)
+    }
 
-	body, err := ioutil.ReadAll(resp.Body)
+    req.SetBasicAuth(stashUser, stashPwd)
 
-	fmt.Println(string(body))
+    resp, err := client.Do(req)
 
-	if err != nil {
-		log.Fatal(err)
-	}
+    if err != nil {
+        log.Fatal(err)
+    }
 
-	var pr struct {
-		Size   uint
-		Limit  uint
-		Values []struct {
-			Id      int
-			Open    bool
-			Closed  bool
-			FromRef struct {
-				DisplayId       string
-				LatestChangeset string
-			}
-		}
-	}
+    body, err := ioutil.ReadAll(resp.Body)
 
-	err = json.Unmarshal(body, &pr)
+    //fmt.Println(string(body))
 
-	if err != nil {
-		log.Fatal(err)
-	}
+    if err != nil {
+        log.Fatal(err)
+    }
 
-	fmt.Println(pr.Size)
-	for _, v := range pr.Values {
-		fmt.Printf("PR: %s, id=%d\n", v.FromRef.DisplayId, v.Id)
-		fmt.Printf("Last commit: %s\n\n", v.FromRef.LatestChangeset)
-	}
+    var pr struct {
+        Size   uint
+        Limit  uint
+        Values []struct {
+            Id      int
+            Open    bool
+            Closed  bool
+            FromRef struct {
+                DisplayId       string
+                LatestChangeset string
+            }
+        }
+    }
+
+    err = json.Unmarshal(body, &pr)
+
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    fmt.Println(pr.Size)
+    for _, v := range pr.Values {
+        fmt.Printf("PR: %s, id=%d\n", v.FromRef.DisplayId, v.Id)
+        fmt.Printf("Last commit: %s\n\n", v.FromRef.LatestChangeset)
+
+        req, err := http.NewRequest("POST", jenkinsUrl+"/job/"+job+"/build"+"?json="+url.QueryEscape(fmt.Sprintf("{\"parameter\": [{\"name\": \"%s\", \"value\": \"origin/%s\"}], \"\":\"\"}", parameter, v.FromRef.DisplayId)), nil)
+
+        if err != nil {
+            log.Fatal(err)
+        }
+
+        req.SetBasicAuth(jenkinsUser, jenkinsPwd)
+        req.Header.Add("Content-Type", "application/json")
+
+
+        client := &http.Client{}
+
+        resp, err := client.Do(req)
+
+        if err != nil {
+            log.Fatal(err)
+        }
+        if resp.StatusCode != 201{
+            body, err := ioutil.ReadAll(resp.Body)
+            if err != nil {
+                log.Fatal(err)
+            }
+            fmt.Println(string(body))
+            log.Fatal(resp.Status)
+        }
+
+    }
 }
