@@ -51,16 +51,7 @@ func main() {
 
 	for {
 
-		req, err := http.NewRequest("GET", stashUrl+"/rest/api/1.0/projects/"+project+"/repos/"+repo+"/pull-requests", nil)
-
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		req.SetBasicAuth(stashUser, stashPwd)
-
-		resp, err := client.Do(req)
-
+		resp, err := get(stashUrl+"/rest/api/1.0/projects/"+project+"/repos/"+repo+"/pull-requests", stashUser, stashPwd)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -204,6 +195,26 @@ func main() {
 	}
 }
 
+// get issue a get on the given url and return the http response and/or an error
+func get(geturl string, user string, password string) (res *http.Response, err error) {
+	req, err := http.NewRequest("GET", geturl, nil)
+
+	if err != nil {
+		return nil, err
+	}
+
+	req.SetBasicAuth(user, password)
+
+	client := &http.Client{}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp, nil
+}
+
 //
 
 //
@@ -240,17 +251,8 @@ func triggerBuild(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job 
 }
 
 func listBuilds(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job string) ([]int, error) {
-	req, err := http.NewRequest("GET", jenkinsUrl+"/job/"+job+"/api/json", nil)
 
-	if err != nil {
-		return nil, err
-	}
-
-	req.SetBasicAuth(jenkinsUser, jenkinsPwd)
-
-	client := &http.Client{}
-
-	resp, err := client.Do(req)
+	resp, err := get(jenkinsUrl+"/job/"+job+"/api/json", jenkinsUser, jenkinsPwd)
 	if err != nil {
 		return nil, err
 	}
@@ -286,17 +288,8 @@ func listBuilds(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job st
 func getGitInfo(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job string, build int) (branch string, sha1 string, err error) {
 	fmt.Println(jenkinsUrl + "/job/" + job + "/" + strconv.Itoa(build) + "/git/api/json")
 
-	req, err := http.NewRequest("GET", jenkinsUrl+"/job/"+job+"/"+strconv.Itoa(build)+"/git/api/json", nil)
+	resp, err := get(jenkinsUrl+"/job/"+job+"/"+strconv.Itoa(build)+"/git/api/json", jenkinsUser, jenkinsPwd)
 
-	if err != nil {
-		return "", "", err
-	}
-
-	req.SetBasicAuth(jenkinsUser, jenkinsPwd)
-
-	client := &http.Client{}
-
-	resp, err := client.Do(req)
 	if err != nil {
 		return "", "", err
 	}
@@ -329,15 +322,8 @@ func getGitInfo(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job st
 }
 
 func getStatus(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job string, build int) (status string, tests string, err error) {
-	req, err := http.NewRequest("GET", jenkinsUrl+"/job/"+job+"/"+strconv.Itoa(build)+"/api/json", nil)
+	resp, err := get(jenkinsUrl+"/job/"+job+"/"+strconv.Itoa(build)+"/api/json", jenkinsUser, jenkinsPwd)
 
-	if err != nil {
-		return "", "", err
-	}
-
-	req.SetBasicAuth(jenkinsUser, jenkinsPwd)
-	client := &http.Client{}
-	resp, err := client.Do(req)
 	if err != nil {
 		return "", "", err
 	}
@@ -360,15 +346,7 @@ func getStatus(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job str
 		return "", "", err
 	}
 
-	req, err = http.NewRequest("GET", jenkinsUrl+"/job/"+job+"/"+strconv.Itoa(build)+"/testReport/api/json", nil)
-	if err != nil {
-		return "", "", err
-	}
-
-	req.SetBasicAuth(jenkinsUser, jenkinsPwd)
-	client = &http.Client{}
-
-	resp, err = client.Do(req)
+	resp, err = get(jenkinsUrl+"/job/"+job+"/"+strconv.Itoa(build)+"/testReport/api/json", jenkinsUser, jenkinsPwd)
 	if err != nil {
 		return "", "", err
 	}
