@@ -3,12 +3,15 @@ package main
 import (
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -29,7 +32,7 @@ func main() {
 
 	job := os.Args[9]
 
-	parameter := os.Args[10]
+	//parameter := os.Args[10]
 
 	//...fuck crapy certificate
 	tr := &http.Transport{
@@ -40,6 +43,11 @@ func main() {
 
 	// get the list of open pull requests
 	lastCommit := make(map[int]string)
+
+	pullRequestByBranch := make(map[string]int)
+
+	// list of built already reported to stash
+	postedBuild := make(map[string]struct{})
 
 	for {
 
@@ -83,24 +91,112 @@ func main() {
 			log.Fatal(err)
 		}
 
-		fmt.Println(pr.Size)
+		fmt.Printf("Pull request count: %d\n", pr.Size)
+
+		ids := make(map[int]struct{})
+
 		for _, v := range pr.Values {
 			fmt.Printf("PR: %s, id=%d\n", v.FromRef.DisplayId, v.Id)
 			fmt.Printf("Last commit: %s\n\n", v.FromRef.LatestChangeset)
 
+			pullRequestByBranch[v.FromRef.DisplayId] = v.Id
+			ids[v.Id] = struct{}{}
+
 			// does this commit was built?
 			commit := lastCommit[v.Id]
-
 			if commit == "" || commit != v.FromRef.LatestChangeset {
 				// trigger the build
-				err = triggerBuild(jenkinsUrl, jenkinsUser, jenkinsPwd, job, v.FromRef.DisplayId, parameter)
+				/*err = triggerBuild(jenkinsUrl, jenkinsUser, jenkinsPwd, job, v.FromRef.DisplayId, parameter)
 
-				if err != nil {
-					log.Fatal(err)
-				}
+								if err != nil {
+				                    	log.Fatal(err)
+								}*/
 
 				// save the last build commit SHA1
 				lastCommit[v.Id] = v.FromRef.LatestChangeset
+			}
+		}
+
+		// clean dead PR
+
+		for k, _ := range lastCommit {
+			_, p := ids[k]
+			if !p {
+				delete(lastCommit, k)
+			}
+		}
+
+		// look for builds to report
+
+		fmt.Println("list builds")
+		builds, err := listBuilds(jenkinsUrl, jenkinsUser, jenkinsPwd, job)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// for each builds check if we already pushed the status
+
+		for _, b := range builds {
+			fmt.Println(b)
+
+			fmt.Println("get git info")
+
+			branch, sha1, err := getGitInfo(jenkinsUrl, jenkinsUser, jenkinsPwd, job, b)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			branch = strings.Replace(branch, "origin/", "", -1)
+
+			status, tests, err := getStatus(jenkinsUrl, jenkinsUser, jenkinsPwd, job, b)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			fmt.Println("job res: " + branch + " " + sha1 + " " + status + " " + tests)
+
+			// does the build was already reported?
+			_, found := postedBuild[branch+"#"+sha1]
+
+			if !found {
+				// post stash comment
+
+				idPr, f := pullRequestByBranch[branch]
+
+				if f {
+					fmt.Println("posting comment : Integration build result for branch " + branch + " (commit: " + sha1 + ") status: " + status + " tests: " + tests)
+					req, err := http.NewRequest("POST", stashUrl+"/rest/api/1.0/projects/"+project+"/repos/"+repo+"/pull-requests/"+strconv.Itoa(idPr)+"/comments",
+						strings.NewReader("{ \"text\" : \"Integration build result for branch: "+branch+", commit: "+sha1+", status: "+status+", tests: "+tests+"\"}"))
+
+					if err != nil {
+						log.Fatal(err)
+					}
+
+					req.Header.Add("Content-Type", "application/json")
+					req.SetBasicAuth(stashUser, stashPwd)
+
+					resp, err := client.Do(req)
+
+					if err != nil {
+						log.Fatal(err)
+					}
+
+					if resp.StatusCode != 201 {
+						body, err := ioutil.ReadAll(resp.Body)
+
+						if err != nil {
+							log.Fatal(err)
+						}
+
+						fmt.Printf("status: %s, raw %s \n"+resp.Status, body)
+
+					}
+
+					postedBuild[branch+"#"+sha1] = struct{}{}
+				} else {
+					fmt.Println("No pull request for this branch build: " + branch)
+				}
+
 			}
 		}
 
@@ -109,7 +205,7 @@ func main() {
 }
 
 //
-// in charge of triggering a parametric job on jenkins
+
 //
 func triggerBuild(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job string, branch string, parameter string) error {
 	req, err := http.NewRequest("POST", jenkinsUrl+"/job/"+job+"/build"+
@@ -129,6 +225,7 @@ func triggerBuild(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job 
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	if resp.StatusCode != 201 {
 		body, err := ioutil.ReadAll(resp.Body)
 
@@ -140,4 +237,160 @@ func triggerBuild(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job 
 		log.Fatal(resp.Status)
 	}
 	return nil
+}
+
+func listBuilds(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job string) ([]int, error) {
+	req, err := http.NewRequest("GET", jenkinsUrl+"/job/"+job+"/api/json", nil)
+
+	if err != nil {
+		return nil, err
+	}
+
+	req.SetBasicAuth(jenkinsUser, jenkinsPwd)
+
+	client := &http.Client{}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+
+	if err != nil {
+		return nil, err
+	}
+
+	var builds struct {
+		Builds []struct {
+			Number int
+		}
+	}
+
+	err = json.Unmarshal(body, &builds)
+	if err != nil {
+		return nil, err
+	}
+
+	size := len(builds.Builds)
+	result := make([]int, size)
+
+	fmt.Printf("number of builds : %d\n", size)
+	for i := 0; i < size; i++ {
+		fmt.Printf(" build n° %d\n", builds.Builds[i].Number)
+		result[i] = builds.Builds[i].Number
+	}
+	return result, nil
+}
+
+func getGitInfo(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job string, build int) (branch string, sha1 string, err error) {
+	fmt.Println(jenkinsUrl + "/job/" + job + "/" + strconv.Itoa(build) + "/git/api/json")
+
+	req, err := http.NewRequest("GET", jenkinsUrl+"/job/"+job+"/"+strconv.Itoa(build)+"/git/api/json", nil)
+
+	if err != nil {
+		return "", "", err
+	}
+
+	req.SetBasicAuth(jenkinsUser, jenkinsPwd)
+
+	client := &http.Client{}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+
+	if err != nil {
+		return "", "", err
+	}
+
+	var git struct {
+		LastBuiltRevision struct {
+			Branch []struct {
+				SHA1 string
+				Name string
+			}
+		}
+	}
+
+	err = json.Unmarshal(body, &git)
+	if err != nil {
+		return "", "", err
+	}
+
+	if len(git.LastBuiltRevision.Branch) != 1 {
+		return "", "", errors.New("weird")
+	}
+
+	return git.LastBuiltRevision.Branch[0].Name, git.LastBuiltRevision.Branch[0].SHA1, nil
+}
+
+func getStatus(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job string, build int) (status string, tests string, err error) {
+	req, err := http.NewRequest("GET", jenkinsUrl+"/job/"+job+"/"+strconv.Itoa(build)+"/api/json", nil)
+
+	if err != nil {
+		return "", "", err
+	}
+
+	req.SetBasicAuth(jenkinsUser, jenkinsPwd)
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+
+	if err != nil {
+		return "", "", err
+	}
+
+	var result struct {
+		Result string
+	}
+
+	//fmt.Printf("RAW : %s\n", body)
+
+	err = json.Unmarshal(body, &result)
+
+	if err != nil {
+		return "", "", err
+	}
+
+	req, err = http.NewRequest("GET", jenkinsUrl+"/job/"+job+"/"+strconv.Itoa(build)+"/testReport/api/json", nil)
+	if err != nil {
+		return "", "", err
+	}
+
+	req.SetBasicAuth(jenkinsUser, jenkinsPwd)
+	client = &http.Client{}
+
+	resp, err = client.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+
+	body, err = ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", "", err
+	}
+
+	if resp.StatusCode == 200 {
+		var testRes struct {
+			FailCount int
+			PassCount int
+			SkipCount int
+		}
+		err = json.Unmarshal(body, &testRes)
+		if err != nil {
+			return "", "", err
+		}
+		return result.Result, fmt.Sprintf("Fail: %d, Pass: %d, Skip: %d", testRes.FailCount, testRes.PassCount, testRes.SkipCount), nil
+	} else {
+		fmt.Printf("RAW JSON %s\n", body)
+		return result.Result, "tests not passed", nil
+	}
 }
