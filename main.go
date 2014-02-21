@@ -32,7 +32,7 @@ func main() {
 
 	job := os.Args[9]
 
-	//parameter := os.Args[10]
+	parameter := os.Args[10]
 
 	//...fuck crapy certificate
 	tr := &http.Transport{
@@ -41,13 +41,31 @@ func main() {
 
 	client := &http.Client{Transport: tr}
 
-	// get the list of open pull requests
-	lastCommit := make(map[int]string)
+	var state struct {
+		// get the list of open pull requests
+		LastCommitForPr map[string]string
+		// pull requests by branch
+		PullRequestByBranch map[string]int
+		// list of built already reported to stash
+		CommentedBuilds map[string]bool
+	}
 
-	pullRequestByBranch := make(map[string]int)
+	// load state.json
+	fileBody, err := ioutil.ReadFile("state.json")
 
-	// list of built already reported to stash
-	postedBuild := make(map[string]struct{})
+	if err == nil {
+		fmt.Println("loading state file")
+		err := json.Unmarshal(fileBody, &state)
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		fmt.Println("can't load the state file: " + err.Error())
+
+		state.LastCommitForPr = make(map[string]string)
+		state.PullRequestByBranch = make(map[string]int)
+		state.CommentedBuilds = make(map[string]bool)
+	}
 
 	for {
 
@@ -90,30 +108,35 @@ func main() {
 			fmt.Printf("PR: %s, id=%d\n", v.FromRef.DisplayId, v.Id)
 			fmt.Printf("Last commit: %s\n\n", v.FromRef.LatestChangeset)
 
-			pullRequestByBranch[v.FromRef.DisplayId] = v.Id
+			state.PullRequestByBranch[v.FromRef.DisplayId] = v.Id
 			ids[v.Id] = struct{}{}
 
 			// does this commit was built?
-			commit := lastCommit[v.Id]
-			if commit == "" || commit != v.FromRef.LatestChangeset {
+			commit, found := state.LastCommitForPr[strconv.Itoa(v.Id)]
+			if !found || commit != v.FromRef.LatestChangeset {
 				// trigger the build
-				/*err = triggerBuild(jenkinsUrl, jenkinsUser, jenkinsPwd, job, v.FromRef.DisplayId, parameter)
+				err = triggerBuild(jenkinsUrl, jenkinsUser, jenkinsPwd, job, v.FromRef.DisplayId, parameter)
 
-								if err != nil {
-				                    	log.Fatal(err)
-								}*/
+				if err != nil {
+					log.Fatal(err)
+				}
 
 				// save the last build commit SHA1
-				lastCommit[v.Id] = v.FromRef.LatestChangeset
+				state.LastCommitForPr[strconv.Itoa(v.Id)] = v.FromRef.LatestChangeset
 			}
 		}
 
 		// clean dead PR
 
-		for k, _ := range lastCommit {
-			_, p := ids[k]
+		for k, _ := range state.LastCommitForPr {
+			v, err := strconv.Atoi(k)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			_, p := ids[v]
 			if !p {
-				delete(lastCommit, k)
+				delete(state.LastCommitForPr, k)
 			}
 		}
 
@@ -144,20 +167,25 @@ func main() {
 				log.Fatal(err)
 			}
 
+			// skip building
+			if status == "" {
+				continue
+			}
+
 			fmt.Println("job res: " + branch + " " + sha1 + " " + status + " " + tests)
 
 			// does the build was already reported?
-			_, found := postedBuild[branch+"#"+sha1]
+			_, found := state.CommentedBuilds[branch+"#"+sha1]
 
 			if !found {
 				// post stash comment
 
-				idPr, f := pullRequestByBranch[branch]
+				idPr, f := state.PullRequestByBranch[branch]
 
 				if f {
-					fmt.Println("posting comment : Integration build result for branch " + branch + " (commit: " + sha1 + ") status: " + status + " tests: " + tests)
+					fmt.Println("posting comment : Integration build result for branch " + branch + " (commit: " + sha1 + ")\n status: " + status + " tests: " + tests)
 					req, err := http.NewRequest("POST", stashUrl+"/rest/api/1.0/projects/"+project+"/repos/"+repo+"/pull-requests/"+strconv.Itoa(idPr)+"/comments",
-						strings.NewReader("{ \"text\" : \"Integration build result for branch: "+branch+", commit: "+sha1+", status: "+status+", tests: "+tests+"\"}"))
+						strings.NewReader("{ \"text\" : \"Integration build result for branch: "+branch+", build: #"+strconv.Itoa(b)+", commit: "+sha1+"\\n status: "+status+", tests: "+tests+"\"}"))
 
 					if err != nil {
 						log.Fatal(err)
@@ -178,17 +206,26 @@ func main() {
 						if err != nil {
 							log.Fatal(err)
 						}
-
 						fmt.Printf("status: %s, raw %s \n"+resp.Status, body)
-
 					}
 
-					postedBuild[branch+"#"+sha1] = struct{}{}
+					state.CommentedBuilds[branch+"#"+sha1] = true
 				} else {
 					fmt.Println("No pull request for this branch build: " + branch)
 				}
-
 			}
+		}
+		// save state
+		content, err := json.Marshal(&state)
+
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		err = ioutil.WriteFile("state.json", content, 0644)
+
+		if err != nil {
+			log.Fatal(err)
 		}
 
 		time.Sleep(time.Duration(1) * time.Minute)
@@ -197,6 +234,8 @@ func main() {
 
 // get issue a get on the given url and return the http response and/or an error
 func get(geturl string, user string, password string) (res *http.Response, err error) {
+	fmt.Printf("GET url: %s\n", geturl)
+
 	req, err := http.NewRequest("GET", geturl, nil)
 
 	if err != nil {
@@ -205,7 +244,12 @@ func get(geturl string, user string, password string) (res *http.Response, err e
 
 	req.SetBasicAuth(user, password)
 
-	client := &http.Client{}
+	//...fuck crapy certificate
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+
+	client := &http.Client{Transport: tr}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -216,11 +260,9 @@ func get(geturl string, user string, password string) (res *http.Response, err e
 }
 
 //
-
-//
 func triggerBuild(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job string, branch string, parameter string) error {
 	req, err := http.NewRequest("POST", jenkinsUrl+"/job/"+job+"/build"+
-		"?json="+url.QueryEscape(fmt.Sprintf("{\"parameter\": [{\"name\": \"%s\", \"value\": \"origin/%s\"}], \"\":\"\"}", parameter, branch)), nil)
+		"?json="+url.QueryEscape(fmt.Sprintf("{\"parameter\": [{\"name\": \"%s\", \"value\": \"%s\"}], \"\":\"\"}", parameter, branch)), nil)
 
 	if err != nil {
 		return err
