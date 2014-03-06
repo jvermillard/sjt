@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -57,7 +56,7 @@ func main() {
 		fmt.Println("loading state file")
 		err := json.Unmarshal(fileBody, &state)
 		if err != nil {
-			log.Fatal(err)
+			panic(err)
 		}
 	} else {
 		fmt.Println("can't load the state file: " + err.Error())
@@ -68,84 +67,12 @@ func main() {
 	}
 
 	for {
-
-		resp, err := get(stashUrl+"/rest/api/1.0/projects/"+project+"/repos/"+repo+"/pull-requests", stashUser, stashPwd)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		body, err := ioutil.ReadAll(resp.Body)
-
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		var pr struct {
-			Size   uint
-			Limit  uint
-			Values []struct {
-				Id      int
-				Open    bool
-				Closed  bool
-				FromRef struct {
-					DisplayId       string
-					LatestChangeset string
-				}
-			}
-		}
-
-		err = json.Unmarshal(body, &pr)
-
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		fmt.Printf("Pull request count: %d\n", pr.Size)
-
-		ids := make(map[int]struct{})
-
-		for _, v := range pr.Values {
-			fmt.Printf("PR: %s, id=%d\n", v.FromRef.DisplayId, v.Id)
-			fmt.Printf("Last commit: %s\n\n", v.FromRef.LatestChangeset)
-
-			state.PullRequestByBranch[v.FromRef.DisplayId] = v.Id
-			ids[v.Id] = struct{}{}
-
-			// does this commit was built?
-			commit, found := state.LastCommitForPr[strconv.Itoa(v.Id)]
-			if !found || commit != v.FromRef.LatestChangeset {
-				// trigger the build
-				err = triggerBuild(jenkinsUrl, jenkinsUser, jenkinsPwd, job, v.FromRef.DisplayId, parameter)
-
-				if err != nil {
-					log.Fatal(err)
-				}
-
-				// save the last build commit SHA1
-				state.LastCommitForPr[strconv.Itoa(v.Id)] = v.FromRef.LatestChangeset
-			}
-		}
-
-		// clean dead PR
-
-		for k, _ := range state.LastCommitForPr {
-			v, err := strconv.Atoi(k)
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			_, p := ids[v]
-			if !p {
-				delete(state.LastCommitForPr, k)
-			}
-		}
-
 		// look for builds to report
 
 		fmt.Println("list builds")
 		builds, err := listBuilds(jenkinsUrl, jenkinsUser, jenkinsPwd, job)
 		if err != nil {
-			log.Fatal(err)
+			panic(err)
 		}
 
 		// for each builds check if we already pushed the status
@@ -157,14 +84,14 @@ func main() {
 
 			branch, sha1, err := getGitInfo(jenkinsUrl, jenkinsUser, jenkinsPwd, job, b)
 			if err != nil {
-				log.Fatal(err)
+				panic(err)
 			}
 
 			branch = strings.Replace(branch, "origin/", "", -1)
 
 			status, tests, err := getStatus(jenkinsUrl, jenkinsUser, jenkinsPwd, job, b)
 			if err != nil {
-				log.Fatal(err)
+				panic(err)
 			}
 
 			// skip building
@@ -188,7 +115,7 @@ func main() {
 						strings.NewReader("{ \"text\" : \"Integration build result for branch: "+branch+", build: #"+strconv.Itoa(b)+", commit: "+sha1+"\\n status: "+status+", tests: "+tests+"\"}"))
 
 					if err != nil {
-						log.Fatal(err)
+						panic(err)
 					}
 
 					req.Header.Add("Content-Type", "application/json")
@@ -197,14 +124,14 @@ func main() {
 					resp, err := client.Do(req)
 
 					if err != nil {
-						log.Fatal(err)
+						panic(err)
 					}
 
 					if resp.StatusCode != 201 {
 						body, err := ioutil.ReadAll(resp.Body)
 
 						if err != nil {
-							log.Fatal(err)
+							panic(err)
 						}
 						fmt.Printf("status: %s, raw %s \n"+resp.Status, body)
 					}
@@ -215,17 +142,89 @@ func main() {
 				}
 			}
 		}
+
+		resp, err := get(stashUrl+"/rest/api/1.0/projects/"+project+"/repos/"+repo+"/pull-requests", stashUser, stashPwd)
+		if err != nil {
+			panic(err)
+		}
+
+		body, err := ioutil.ReadAll(resp.Body)
+
+		if err != nil {
+			panic(err)
+		}
+
+		var pr struct {
+			Size   uint
+			Limit  uint
+			Values []struct {
+				Id      int
+				Open    bool
+				Closed  bool
+				FromRef struct {
+					DisplayId       string
+					LatestChangeset string
+				}
+			}
+		}
+
+		err = json.Unmarshal(body, &pr)
+
+		if err != nil {
+			panic(err)
+		}
+
+		fmt.Printf("Pull request count: %d\n", pr.Size)
+
+		ids := make(map[int]struct{})
+
+		for _, v := range pr.Values {
+			fmt.Printf("PR: %s, id=%d\n", v.FromRef.DisplayId, v.Id)
+			fmt.Printf("Last commit: %s\n\n", v.FromRef.LatestChangeset)
+
+			state.PullRequestByBranch[v.FromRef.DisplayId] = v.Id
+			ids[v.Id] = struct{}{}
+
+			// does this commit was built?
+			commit, found := state.LastCommitForPr[strconv.Itoa(v.Id)]
+			if !found || commit != v.FromRef.LatestChangeset {
+				// trigger the build
+				err = triggerBuild(jenkinsUrl, jenkinsUser, jenkinsPwd, job, v.FromRef.DisplayId, parameter)
+
+				if err != nil {
+					panic(err)
+				}
+
+				// save the last build commit SHA1
+				state.LastCommitForPr[strconv.Itoa(v.Id)] = v.FromRef.LatestChangeset
+			}
+		}
+
+		// clean dead PR
+
+		for k, _ := range state.LastCommitForPr {
+			v, err := strconv.Atoi(k)
+			if err != nil {
+				panic(err)
+			}
+
+			_, p := ids[v]
+			if !p {
+				delete(state.LastCommitForPr, k)
+			}
+		}
+
 		// save state
 		content, err := json.Marshal(&state)
 
 		if err != nil {
-			log.Fatal(err)
+			panic(err)
 		}
 
 		err = ioutil.WriteFile("state.json", content, 0644)
 
 		if err != nil {
-			log.Fatal(err)
+			panic(err)
 		}
 
 		time.Sleep(time.Duration(1) * time.Minute)
@@ -261,8 +260,13 @@ func get(geturl string, user string, password string) (res *http.Response, err e
 
 //
 func triggerBuild(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job string, branch string, parameter string) error {
-	req, err := http.NewRequest("POST", jenkinsUrl+"/job/"+job+"/build"+
-		"?json="+url.QueryEscape(fmt.Sprintf("{\"parameter\": [{\"name\": \"%s\", \"value\": \"%s\"}], \"\":\"\"}", parameter, branch)), nil)
+	fmt.Println("triggering build for branch :'" + branch + "'")
+
+	postUrl := jenkinsUrl + "/job/" + job + "/build" +
+		"?json=" + url.QueryEscape(fmt.Sprintf("{\"parameter\": [{\"name\": \"%s\", \"value\": \"%s\"}], \"\":\"\"}", parameter, branch))
+
+	fmt.Println("POST URL : " + postUrl)
+	req, err := http.NewRequest("POST", postUrl, nil)
 
 	if err != nil {
 		return err
@@ -276,7 +280,7 @@ func triggerBuild(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job 
 	resp, err := client.Do(req)
 
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	if resp.StatusCode != 201 {
@@ -287,7 +291,7 @@ func triggerBuild(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job 
 		}
 
 		fmt.Println(string(body))
-		log.Fatal(resp.Status)
+		return errors.New(resp.Status)
 	}
 	return nil
 }
