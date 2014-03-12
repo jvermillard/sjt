@@ -112,7 +112,7 @@ func main() {
 				if f {
 					fmt.Println("posting comment : Integration build result for branch " + branch + " (commit: " + sha1 + ")\n status: " + status + " tests: " + tests)
 					req, err := http.NewRequest("POST", stashUrl+"/rest/api/1.0/projects/"+project+"/repos/"+repo+"/pull-requests/"+strconv.Itoa(idPr)+"/comments",
-						strings.NewReader("{ \"text\" : \"Integration build result for branch: "+branch+", build: #"+strconv.Itoa(b)+", commit: "+sha1+"\\n status: "+status+", tests: "+tests+"\"}"))
+						strings.NewReader("{ \"text\" : \"**Integration build result**\\n\\n    * Build: **#"+strconv.Itoa(b)+"**\\n\\n    * Commit: **"+sha1+"**\\n\\n    * Status: **"+status+"** \\n\\n    * Tests: **"+tests+"**\"}"))
 
 					if err != nil {
 						panic(err)
