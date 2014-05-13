@@ -192,7 +192,9 @@ func main() {
 				err = triggerBuild(jenkinsUrl, jenkinsUser, jenkinsPwd, job, v.FromRef.DisplayId, parameter)
 
 				if err != nil {
-					panic(err)
+					// jenkins is probably fucked up, let's continue
+					fmt.Printf("jenkins build trigger fucked-up, branch %s, error : %q, we continue\n", v.FromRef.DisplayId, err.Error())
+					continue
 				}
 
 				// save the last build commit SHA1
