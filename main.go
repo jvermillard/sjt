@@ -84,7 +84,9 @@ func main() {
 
 			branch, sha1, err := getGitInfo(jenkinsUrl, jenkinsUser, jenkinsPwd, job, b)
 			if err != nil {
-				panic(err)
+				//panic(err)
+				fmt.Printf("Skipping: can't get job git commit status, job %d, error %q\n", job, err.Error())
+				continue
 			}
 
 			branch = strings.Replace(branch, "origin/", "", -1)
