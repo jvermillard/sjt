@@ -67,9 +67,10 @@ func main() {
 	}
 
 	for {
+		time.Sleep(time.Duration(1) * time.Minute)
+
 		// look for builds to report
 
-		fmt.Println("list builds")
 		builds, err := listBuilds(jenkinsUrl, jenkinsUser, jenkinsPwd, job)
 		if err != nil {
 			panic(err)
@@ -78,13 +79,8 @@ func main() {
 		// for each builds check if we already pushed the status
 
 		for _, b := range builds {
-			fmt.Println(b)
-
-			fmt.Println("get git info")
-
 			branch, sha1, err := getGitInfo(jenkinsUrl, jenkinsUser, jenkinsPwd, job, b)
 			if err != nil {
-				//panic(err)
 				fmt.Printf("Skipping: can't get job git commit status, job %d, error %q\n", job, err.Error())
 				continue
 			}
@@ -117,7 +113,8 @@ func main() {
 						strings.NewReader("{ \"text\" : \"**Integration build result**\\n\\n * Build: **#"+strconv.Itoa(b)+"**\\n\\n * Commit: **"+sha1+"**\\n\\n * Status: **"+status+"** \\n\\n * Tests: **"+tests+"**\"}"))
 
 					if err != nil {
-						panic(err)
+						fmt.Printf("Skipping: can't post comment on stash, job %d, error %q\n", job, err.Error())
+						continue
 					}
 
 					req.Header.Add("Content-Type", "application/json")
@@ -147,7 +144,8 @@ func main() {
 
 		resp, err := get(stashUrl+"/rest/api/1.0/projects/"+project+"/repos/"+repo+"/pull-requests", stashUser, stashPwd)
 		if err != nil {
-			panic(err)
+			fmt.Println("Problem calling stash comment API: %s\n", err.Error())
+			continue
 		}
 
 		body, err := ioutil.ReadAll(resp.Body)
@@ -231,7 +229,6 @@ func main() {
 			panic(err)
 		}
 
-		time.Sleep(time.Duration(1) * time.Minute)
 	}
 }
 
