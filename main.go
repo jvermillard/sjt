@@ -89,7 +89,8 @@ func main() {
 
 			status, tests, err := getStatus(jenkinsUrl, jenkinsUser, jenkinsPwd, job, b)
 			if err != nil {
-				panic(err)
+				fmt.Printf("Skipping: can't get job tests status, job %d, error %q\n", job, err.Error())
+				continue
 			}
 
 			// skip building
