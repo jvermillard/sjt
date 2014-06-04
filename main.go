@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -123,7 +124,7 @@ func main() {
 
 				if f {
 
-					err = postStatus(stashUrl+"/rest/api/1.0/projects/"+project+"/repos/"+repo+"/pull-requests/", stashUser, stashPwd, idPr, sha1, status, tests, b)
+					err = postStatus(stashUrl+"/rest/", "api/1.0/projects/"+project+"/repos/"+repo+"/pull-requests/", stashUser, stashPwd, idPr, sha1, status, tests, b)
 
 					if err != nil {
 						fmt.Printf("Skipping: can't post comment on stash, job %d, error %q\n", job, err.Error())
@@ -228,10 +229,10 @@ func main() {
 }
 
 // post the status comment in the stash pull request
-func postStatus(baseUrl string, user string, password string, idPr int, sha1 string, status string, tests string, idBuild int) error {
+func postStatus(baseUrl string, prjUrl string, user string, password string, idPr int, sha1 string, status string, tests string, idBuild int) error {
 	dbg("posting comment : Integration build result for PR " + strconv.Itoa(idPr) + " (commit: " + sha1 + ")\n status: " + status + " tests: " + tests)
 
-	req, err := http.NewRequest("POST", baseUrl+strconv.Itoa(idPr)+"/comments",
+	req, err := http.NewRequest("POST", baseUrl+prjUrl+strconv.Itoa(idPr)+"/comments",
 		strings.NewReader("{ \"text\" : \"**Integration build result**\\n\\n * Build: **#"+strconv.Itoa(idBuild)+"**\\n\\n * Commit: **"+sha1+"**\\n\\n * Status: **"+status+"** \\n\\n * Tests: **"+tests+"**\\n\\n * Report: http://av-test-reports.s3-website-eu-west-1.amazonaws.com/"+strconv.Itoa(idBuild)+"/report.html \"}"))
 
 	if err != nil {
@@ -261,6 +262,36 @@ func postStatus(baseUrl string, user string, password string, idPr int, sha1 str
 			panic(err)
 		}
 		dbg("status: %s, raw %s \n", resp.Status, body)
+	}
+
+	// post the build status for the commit
+
+	resp, err = http.Get("https://s3-eu-west-1.amazonaws.com/av-test-reports/" + strconv.Itoa(idBuild) + "/stash-build-result.json")
+	if err != nil && resp.StatusCode == 200 {
+		data, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			// post that as commit build status
+			req, err := http.NewRequest("POST", baseUrl+"/build-status/1.0/commits/"+sha1, bytes.NewReader(data))
+			if err != nil {
+				return err
+			}
+
+			req.Header.Add("Content-Type", "application/json")
+			req.SetBasicAuth(user, password)
+
+			//...fuck crapy certificate
+			tr := &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			}
+
+			client := &http.Client{Transport: tr}
+
+			resp, err = client.Do(req)
+
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	return err
