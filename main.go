@@ -266,7 +266,7 @@ func postStatus(baseUrl string, prjUrl string, user string, password string, idP
 
 	// post the build status for the commit
 
-	resp, err = http.Get("https://s3-eu-west-1.amazonaws.com/av-test-reports/" + strconv.Itoa(idBuild) + "/stash-build-result.json")
+	resp, err = http.Get("http://s3-eu-west-1.amazonaws.com/av-test-reports/" + strconv.Itoa(idBuild) + "/stash-build-result.json")
 	if err == nil && resp.StatusCode == 200 {
 		data, err := ioutil.ReadAll(resp.Body)
 		if err == nil {
