@@ -175,8 +175,8 @@ func main() {
 		ids := make(map[int]struct{})
 
 		for _, v := range pr.Values {
-			dbg("PR: %s, id=%d\n", v.FromRef.DisplayId, v.Id)
-			dbg("Last commit: %s\n\n", v.FromRef.LatestChangeset)
+			//dbg("PR: %s, id=%d\n", v.FromRef.DisplayId, v.Id)
+			//dbg("Last commit: %s\n\n", v.FromRef.LatestChangeset)
 
 			state.PullRequestByBranch[v.FromRef.DisplayId] = v.Id
 			ids[v.Id] = struct{}{}
@@ -261,7 +261,7 @@ func postStatus(baseUrl string, prjUrl string, user string, password string, idP
 		if err != nil {
 			panic(err)
 		}
-		dbg("status: %s, raw %s \n", resp.Status, body)
+		dbg("comment status: " + resp.Status + " body: " + string(body) + "\n")
 	}
 
 	// post the build status for the commit
@@ -271,6 +271,7 @@ func postStatus(baseUrl string, prjUrl string, user string, password string, idP
 		data, err := ioutil.ReadAll(resp.Body)
 		if err == nil {
 			// post that as commit build status
+			dbg("commit URL: " + baseUrl + "/build-status/1.0/commits/" + sha1 + "\n")
 			req, err := http.NewRequest("POST", baseUrl+"/build-status/1.0/commits/"+sha1, bytes.NewReader(data))
 			if err != nil {
 				dbg("problem post build: %s\n", err.Error())
@@ -292,7 +293,13 @@ func postStatus(baseUrl string, prjUrl string, user string, password string, idP
 			if err != nil {
 				return err
 			}
+
+			cnt, err := ioutil.ReadAll(resp.Body)
+
+			dbg("post commit status : " + resp.Status + "\n" + string(cnt) + "\n")
 		}
+	} else {
+		dbg("no commit result json on AWS, skipping")
 	}
 
 	return err
