@@ -361,7 +361,7 @@ func listBuilds(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job st
 
 	dbg("number of builds : %d\n", size)
 	for i := 0; i < size; i++ {
-		fmt.Printf(" build n° %d\n", builds.Builds[i].Number)
+		dbg(" build n° %d\n", builds.Builds[i].Number)
 		result[i] = builds.Builds[i].Number
 	}
 	return result, nil
