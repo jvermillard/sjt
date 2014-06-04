@@ -112,7 +112,7 @@ func main() {
 				continue
 			}
 
-			dbg("job res: " + branch + " " + sha1 + " " + status + " " + tests)
+			dbg("job res: " + branch + " " + sha1 + " " + status + " " + tests + "\n")
 
 			// does the build was already reported?
 			_, found := state.CommentedBuilds[branch+"#"+sha1]
@@ -133,7 +133,7 @@ func main() {
 
 					state.CommentedBuilds[branch+"#"+sha1] = true
 				} else {
-					dbg("No pull request for this branch build: " + branch)
+					dbg("No pull request for this branch build: " + branch + "\n")
 				}
 			}
 		}
@@ -230,7 +230,7 @@ func main() {
 
 // post the status comment in the stash pull request
 func postStatus(baseUrl string, prjUrl string, user string, password string, idPr int, sha1 string, status string, tests string, idBuild int) error {
-	dbg("posting comment : Integration build result for PR " + strconv.Itoa(idPr) + " (commit: " + sha1 + ")\n status: " + status + " tests: " + tests)
+	dbg("posting comment : Integration build result for PR " + strconv.Itoa(idPr) + " (commit: " + sha1 + ")\n status: " + status + " tests: " + tests + "\n")
 
 	req, err := http.NewRequest("POST", baseUrl+prjUrl+strconv.Itoa(idPr)+"/comments",
 		strings.NewReader("{ \"text\" : \"**Integration build result**\\n\\n * Build: **#"+strconv.Itoa(idBuild)+"**\\n\\n * Commit: **"+sha1+"**\\n\\n * Status: **"+status+"** \\n\\n * Tests: **"+tests+"**\\n\\n * Report: http://av-test-reports.s3-website-eu-west-1.amazonaws.com/"+strconv.Itoa(idBuild)+"/report.html \"}"))
@@ -273,6 +273,7 @@ func postStatus(baseUrl string, prjUrl string, user string, password string, idP
 			// post that as commit build status
 			req, err := http.NewRequest("POST", baseUrl+"/build-status/1.0/commits/"+sha1, bytes.NewReader(data))
 			if err != nil {
+				dbg("problem post build: %s\n", err.Error())
 				return err
 			}
 
@@ -326,12 +327,12 @@ func get(geturl string, user string, password string) (res *http.Response, err e
 
 // trigger a build for a given branch
 func triggerBuild(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job string, branch string, parameter string) error {
-	dbg("triggering build for branch :'" + branch + "'")
+	dbg("triggering build for branch :'" + branch + "'\n")
 
 	postUrl := jenkinsUrl + "/job/" + job + "/build" +
 		"?json=" + url.QueryEscape(fmt.Sprintf("{\"parameter\": [{\"name\": \"%s\", \"value\": \"%s\"}], \"\":\"\"}", parameter, branch))
 
-	dbg("POST URL : " + postUrl)
+	dbg("POST URL : " + postUrl + "\n")
 	req, err := http.NewRequest("POST", postUrl, nil)
 
 	if err != nil {
@@ -400,7 +401,7 @@ func listBuilds(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job st
 
 // Get the git information about a build, what we want: branch and commit ID
 func getGitInfo(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job string, build int) (branch string, sha1 string, err error) {
-	dbg(jenkinsUrl + "/job/" + job + "/" + strconv.Itoa(build) + "/git/api/json")
+	dbg(jenkinsUrl + "/job/" + job + "/" + strconv.Itoa(build) + "/git/api/json\n")
 
 	resp, err := get(jenkinsUrl+"/job/"+job+"/"+strconv.Itoa(build)+"/git/api/json", jenkinsUser, jenkinsPwd)
 
