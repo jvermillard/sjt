@@ -14,9 +14,28 @@ import (
 	"time"
 )
 
+// gloabel debug tracing
+var debug bool = false
+
+func dbg(text string, args ...interface{}) {
+	if debug {
+		fmt.Printf(text, args)
+	}
+}
 func main() {
 	fmt.Println("Stash to Jenkins")
 
+	// is in debug mode?
+
+	dbgStr := os.Getenv("DEBUG")
+	if len(dbgStr) > 0 {
+		debug = true
+	}
+
+	if len(os.Args) != 11 {
+		fmt.Errorf("Invalid number of arguments\nUsage : [stash url] [stash user] [stash password] [stash project] [stash repository] [jenkins url] [jenkins user] [jenkins password] [job] [job parameter]\n")
+		os.Exit(1)
+	}
 	stashUrl := os.Args[1]
 	stashUser := os.Args[2]
 	stashPwd := os.Args[3]
@@ -33,13 +52,6 @@ func main() {
 
 	parameter := os.Args[10]
 
-	//...fuck crapy certificate
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-
-	client := &http.Client{Transport: tr}
-
 	var state struct {
 		// get the list of open pull requests
 		LastCommitForPr map[string]string
@@ -53,11 +65,12 @@ func main() {
 	fileBody, err := ioutil.ReadFile("state.json")
 
 	if err == nil {
-		fmt.Println("loading state file")
+		dbg("loading state file")
 		err := json.Unmarshal(fileBody, &state)
 		if err != nil {
 			panic(err)
 		}
+
 	} else {
 		fmt.Println("can't load the state file: " + err.Error())
 
@@ -98,7 +111,7 @@ func main() {
 				continue
 			}
 
-			fmt.Println("job res: " + branch + " " + sha1 + " " + status + " " + tests)
+			dbg("job res: " + branch + " " + sha1 + " " + status + " " + tests)
 
 			// does the build was already reported?
 			_, found := state.CommentedBuilds[branch+"#"+sha1]
@@ -109,36 +122,17 @@ func main() {
 				idPr, f := state.PullRequestByBranch[branch]
 
 				if f {
-					fmt.Println("posting comment : Integration build result for branch " + branch + " (commit: " + sha1 + ")\n status: " + status + " tests: " + tests)
-					req, err := http.NewRequest("POST", stashUrl+"/rest/api/1.0/projects/"+project+"/repos/"+repo+"/pull-requests/"+strconv.Itoa(idPr)+"/comments",
-						strings.NewReader("{ \"text\" : \"**Integration build result**\\n\\n * Build: **#"+strconv.Itoa(b)+"**\\n\\n * Commit: **"+sha1+"**\\n\\n * Status: **"+status+"** \\n\\n * Tests: **"+tests+"**\\n\\n * Report: http://av-test-reports.s3-website-eu-west-1.amazonaws.com/"+strconv.Itoa(b)+"/report.html \"}"))
+
+					err = postStatus(stashUrl+"/rest/api/1.0/projects/"+project+"/repos/"+repo+"/pull-requests/", stashUser, stashPwd, idPr, sha1, status, tests, b)
 
 					if err != nil {
 						fmt.Printf("Skipping: can't post comment on stash, job %d, error %q\n", job, err.Error())
 						continue
 					}
 
-					req.Header.Add("Content-Type", "application/json")
-					req.SetBasicAuth(stashUser, stashPwd)
-
-					resp, err := client.Do(req)
-
-					if err != nil {
-						panic(err)
-					}
-
-					if resp.StatusCode != 201 {
-						body, err := ioutil.ReadAll(resp.Body)
-
-						if err != nil {
-							panic(err)
-						}
-						fmt.Printf("status: %s, raw %s \n"+resp.Status, body)
-					}
-
 					state.CommentedBuilds[branch+"#"+sha1] = true
 				} else {
-					fmt.Println("No pull request for this branch build: " + branch)
+					dbg("No pull request for this branch build: " + branch)
 				}
 			}
 		}
@@ -175,13 +169,13 @@ func main() {
 			panic(err)
 		}
 
-		fmt.Printf("Pull request count: %d\n", pr.Size)
+		dbg("Pull request count: %d\n", pr.Size)
 
 		ids := make(map[int]struct{})
 
 		for _, v := range pr.Values {
-			fmt.Printf("PR: %s, id=%d\n", v.FromRef.DisplayId, v.Id)
-			fmt.Printf("Last commit: %s\n\n", v.FromRef.LatestChangeset)
+			dbg("PR: %s, id=%d\n", v.FromRef.DisplayId, v.Id)
+			dbg("Last commit: %s\n\n", v.FromRef.LatestChangeset)
 
 			state.PullRequestByBranch[v.FromRef.DisplayId] = v.Id
 			ids[v.Id] = struct{}{}
@@ -233,9 +227,48 @@ func main() {
 	}
 }
 
+// post the status comment in the stash pull request
+func postStatus(baseUrl string, user string, password string, idPr int, sha1 string, status string, tests string, idBuild int) error {
+	dbg("posting comment : Integration build result for PR " + strconv.Itoa(idPr) + " (commit: " + sha1 + ")\n status: " + status + " tests: " + tests)
+
+	req, err := http.NewRequest("POST", baseUrl+strconv.Itoa(idPr)+"/comments",
+		strings.NewReader("{ \"text\" : \"**Integration build result**\\n\\n * Build: **#"+strconv.Itoa(idBuild)+"**\\n\\n * Commit: **"+sha1+"**\\n\\n * Status: **"+status+"** \\n\\n * Tests: **"+tests+"**\\n\\n * Report: http://av-test-reports.s3-website-eu-west-1.amazonaws.com/"+strconv.Itoa(idBuild)+"/report.html \"}"))
+
+	if err != nil {
+		return err
+	}
+
+	req.Header.Add("Content-Type", "application/json")
+	req.SetBasicAuth(user, password)
+
+	//...fuck crapy certificate
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+
+	client := &http.Client{Transport: tr}
+
+	resp, err := client.Do(req)
+
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode != 201 {
+		body, err := ioutil.ReadAll(resp.Body)
+
+		if err != nil {
+			panic(err)
+		}
+		dbg("status: %s, raw %s \n", resp.Status, body)
+	}
+
+	return err
+}
+
 // get issue a get on the given url and return the http response and/or an error
 func get(geturl string, user string, password string) (res *http.Response, err error) {
-	fmt.Printf("GET url: %s\n", geturl)
+	dbg("GET url: %s\n", geturl)
 
 	req, err := http.NewRequest("GET", geturl, nil)
 
@@ -260,14 +293,14 @@ func get(geturl string, user string, password string) (res *http.Response, err e
 	return resp, nil
 }
 
-//
+// trigger a build for a given branch
 func triggerBuild(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job string, branch string, parameter string) error {
-	fmt.Println("triggering build for branch :'" + branch + "'")
+	dbg("triggering build for branch :'" + branch + "'")
 
 	postUrl := jenkinsUrl + "/job/" + job + "/build" +
 		"?json=" + url.QueryEscape(fmt.Sprintf("{\"parameter\": [{\"name\": \"%s\", \"value\": \"%s\"}], \"\":\"\"}", parameter, branch))
 
-	fmt.Println("POST URL : " + postUrl)
+	dbg("POST URL : " + postUrl)
 	req, err := http.NewRequest("POST", postUrl, nil)
 
 	if err != nil {
@@ -298,6 +331,7 @@ func triggerBuild(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job 
 	return nil
 }
 
+// List the identifiers of previously completeted jenkins builds
 func listBuilds(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job string) ([]int, error) {
 
 	resp, err := get(jenkinsUrl+"/job/"+job+"/api/json", jenkinsUser, jenkinsPwd)
@@ -325,7 +359,7 @@ func listBuilds(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job st
 	size := len(builds.Builds)
 	result := make([]int, size)
 
-	fmt.Printf("number of builds : %d\n", size)
+	dbg("number of builds : %d\n", size)
 	for i := 0; i < size; i++ {
 		fmt.Printf(" build n° %d\n", builds.Builds[i].Number)
 		result[i] = builds.Builds[i].Number
@@ -333,8 +367,9 @@ func listBuilds(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job st
 	return result, nil
 }
 
+// Get the git information about a build, what we want: branch and commit ID
 func getGitInfo(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job string, build int) (branch string, sha1 string, err error) {
-	fmt.Println(jenkinsUrl + "/job/" + job + "/" + strconv.Itoa(build) + "/git/api/json")
+	dbg(jenkinsUrl + "/job/" + job + "/" + strconv.Itoa(build) + "/git/api/json")
 
 	resp, err := get(jenkinsUrl+"/job/"+job+"/"+strconv.Itoa(build)+"/git/api/json", jenkinsUser, jenkinsPwd)
 
@@ -416,7 +451,7 @@ func getStatus(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job str
 		}
 		return result.Result, fmt.Sprintf("Fail: %d, Pass: %d, Skip: %d", testRes.FailCount, testRes.PassCount, testRes.SkipCount), nil
 	} else {
-		fmt.Printf("RAW JSON %s\n", body)
+		dbg("RAW JSON %s\n", body)
 		return result.Result, "tests not passed", nil
 	}
 }
