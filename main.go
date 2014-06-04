@@ -271,8 +271,8 @@ func postStatus(baseUrl string, prjUrl string, user string, password string, idP
 		data, err := ioutil.ReadAll(resp.Body)
 		if err == nil {
 			// post that as commit build status
-			dbg("commit URL: " + baseUrl + "/build-status/1.0/commits/" + sha1 + "\n")
-			req, err := http.NewRequest("POST", baseUrl+"/build-status/1.0/commits/"+sha1, bytes.NewReader(data))
+			dbg("commit URL: " + baseUrl + "build-status/1.0/commits/" + sha1 + "\n")
+			req, err := http.NewRequest("POST", baseUrl+"build-status/1.0/commits/"+sha1, bytes.NewReader(data))
 			if err != nil {
 				dbg("problem post build: %s\n", err.Error())
 				return err
