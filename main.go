@@ -115,7 +115,7 @@ func main() {
 			dbg("job res: " + branch + " " + sha1 + " " + status + " " + tests + "\n")
 
 			// does the build was already reported?
-			_, found := state.CommentedBuilds[branch+"#"+sha1]
+			_, found := state.CommentedBuilds[branch+"#"+sha1+"#"+strconv.Itoa(b)]
 
 			if !found {
 				// post stash comment
@@ -131,7 +131,7 @@ func main() {
 						continue
 					}
 
-					state.CommentedBuilds[branch+"#"+sha1] = true
+					state.CommentedBuilds[branch+"#"+sha1+"#"+strconv.Itoa(b)] = true
 				} else {
 					dbg("No pull request for this branch build: " + branch + "\n")
 				}
