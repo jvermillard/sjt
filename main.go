@@ -336,6 +336,8 @@ func get(geturl string, user string, password string) (res *http.Response, err e
 func triggerBuild(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job string, branch string, parameter string) error {
 	dbg("triggering build for branch :'" + branch + "'\n")
 
+	time.Sleep(time.Duration(30) * time.Second)
+
 	postUrl := jenkinsUrl + "/job/" + job + "/build" +
 		"?json=" + url.QueryEscape(fmt.Sprintf("{\"parameter\": [{\"name\": \"%s\", \"value\": \"%s\"}], \"\":\"\"}", parameter, branch))
 
