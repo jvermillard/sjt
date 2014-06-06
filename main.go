@@ -140,14 +140,15 @@ func main() {
 
 		resp, err := get(stashUrl+"/rest/api/1.0/projects/"+project+"/repos/"+repo+"/pull-requests", stashUser, stashPwd)
 		if err != nil {
-			fmt.Println("Problem calling stash comment API: %s\n", err.Error())
+			fmt.Println("Problem reading stash PR list: %s\n", err.Error())
 			continue
 		}
 
 		body, err := ioutil.ReadAll(resp.Body)
 
 		if err != nil {
-			panic(err)
+			fmt.Println("Problem reading stash PR list: %s\n", err.Error())
+			continue
 		}
 
 		var pr struct {
@@ -167,7 +168,8 @@ func main() {
 		err = json.Unmarshal(body, &pr)
 
 		if err != nil {
-			panic(err)
+			fmt.Println("Problem reading stash PR list: %s\n", err.Error())
+			continue
 		}
 
 		dbg("Pull request count: %d\n", pr.Size)
