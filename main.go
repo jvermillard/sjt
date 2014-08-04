@@ -289,7 +289,9 @@ func postBuildStatus(baseUrl string, user string, password string, sha1 string, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return "", errors.New(fmt.Sprint("statuscode %d", resp.StatusCode))
+		fmt.Println("URI : http://s3-eu-west-1.amazonaws.com/av-test-reports/"+strconv.Itoa(idBuild)+"/stash-build-result.json returned ", resp.Status)
+		//return "", errors.New(fmt.Sprint("statuscode: ", resp.StatusCode))
+		return "NOREPORT", nil
 	}
 
 	data, err := ioutil.ReadAll(resp.Body)
