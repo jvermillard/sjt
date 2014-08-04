@@ -24,7 +24,7 @@ func dbg(text string, args ...interface{}) {
 	}
 }
 func main() {
-	fmt.Println("Stash to Jenkins")
+	fmt.Println("Stash to Jenkins and back :)")
 
 	// is in debug mode?
 
@@ -144,6 +144,8 @@ func main() {
 			continue
 		}
 
+		defer resp.Body.Close()
+
 		body, err := ioutil.ReadAll(resp.Body)
 
 		if err != nil {
@@ -234,8 +236,14 @@ func main() {
 func postStatus(baseUrl string, prjUrl string, user string, password string, idPr int, sha1 string, status string, tests string, idBuild int) error {
 	dbg("posting comment : Integration build result for PR " + strconv.Itoa(idPr) + " (commit: " + sha1 + ")\n status: " + status + " tests: " + tests + "\n")
 
+	buildStatus, err := postBuildStatus(baseUrl, user, password, sha1, idBuild)
+
+	if err != nil {
+		return err
+	}
+
 	req, err := http.NewRequest("POST", baseUrl+prjUrl+strconv.Itoa(idPr)+"/comments",
-		strings.NewReader("{ \"text\" : \"**Integration build result**\\n\\n * Build: **#"+strconv.Itoa(idBuild)+"**\\n\\n * Commit: **"+sha1+"**\\n\\n * Status: **"+status+"** \\n\\n * Tests: **"+tests+"**\\n\\n * Report: http://av-test-reports.s3-website-eu-west-1.amazonaws.com/"+strconv.Itoa(idBuild)+"/report.html \"}"))
+		strings.NewReader("{ \"text\" : \"**Integration build result**\\n\\n * Build: **#"+strconv.Itoa(idBuild)+"**\\n\\n * Commit: **"+sha1+"**\\n\\n * Status: **"+buildStatus+"** \\n\\n * Tests: **"+tests+"**\\n\\n * Report: http://av-test-reports.s3-website-eu-west-1.amazonaws.com/"+strconv.Itoa(idBuild)+"/report.html \"}"))
 
 	if err != nil {
 		return err
@@ -257,6 +265,8 @@ func postStatus(baseUrl string, prjUrl string, user string, password string, idP
 		return err
 	}
 
+	defer resp.Body.Close()
+
 	if resp.StatusCode != 201 {
 		body, err := ioutil.ReadAll(resp.Body)
 
@@ -266,45 +276,66 @@ func postStatus(baseUrl string, prjUrl string, user string, password string, idP
 		dbg("comment status: " + resp.Status + " body: " + string(body) + "\n")
 	}
 
+	return err
+}
+
+func postBuildStatus(baseUrl string, user string, password string, sha1 string, idBuild int) (string, error) {
 	// post the build status for the commit
 
-	resp, err = http.Get("http://s3-eu-west-1.amazonaws.com/av-test-reports/" + strconv.Itoa(idBuild) + "/stash-build-result.json")
-	if err == nil && resp.StatusCode == 200 {
-		data, err := ioutil.ReadAll(resp.Body)
-		if err == nil {
-			// post that as commit build status
-			dbg("commit URL: " + baseUrl + "build-status/1.0/commits/" + sha1 + "\n")
-			req, err := http.NewRequest("POST", baseUrl+"build-status/1.0/commits/"+sha1, bytes.NewReader(data))
-			if err != nil {
-				dbg("problem post build: %s\n", err.Error())
-				return err
-			}
+	resp, err := http.Get("http://s3-eu-west-1.amazonaws.com/av-test-reports/" + strconv.Itoa(idBuild) + "/stash-build-result.json")
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
 
-			req.Header.Add("Content-Type", "application/json")
-			req.SetBasicAuth(user, password)
-
-			//...fuck crapy certificate
-			tr := &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			}
-
-			client := &http.Client{Transport: tr}
-
-			resp, err = client.Do(req)
-
-			if err != nil {
-				return err
-			}
-
-			cnt, err := ioutil.ReadAll(resp.Body)
-
-			dbg("post commit status : " + resp.Status + "\n" + string(cnt) + "\n")
-		}
-	} else {
-		dbg("no commit result json on AWS, skipping")
+	if resp.StatusCode != 200 {
+		return "", errors.New(fmt.Sprint("statuscode %d", resp.StatusCode))
 	}
 
-	return err
+	data, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	// post that as commit build status
+	dbg("commit URL: " + baseUrl + "build-status/1.0/commits/" + sha1 + "\n")
+	req, err := http.NewRequest("POST", baseUrl+"build-status/1.0/commits/"+sha1, bytes.NewReader(data))
+	if err != nil {
+		dbg("problem post build: %s\n", err.Error())
+		return "", err
+	}
+
+	req.Header.Add("Content-Type", "application/json")
+	req.SetBasicAuth(user, password)
+
+	//...fuck crapy certificate
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+
+	client := &http.Client{Transport: tr}
+
+	resp, err = client.Do(req)
+
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	cnt, err := ioutil.ReadAll(resp.Body)
+
+	dbg("post commit status : " + resp.Status + "\n" + string(cnt) + "\n")
+
+	// extract the status from the json
+	var status struct{ state string }
+
+	err = json.Unmarshal(data, &status)
+
+	if err != nil {
+		return "", err
+	}
+
+	return status.state, nil
 }
 
 // get issue a get on the given url and return the http response and/or an error
@@ -454,6 +485,8 @@ func getStatus(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job str
 		return "", "", err
 	}
 
+	defer resp.Body.Close()
+
 	body, err := ioutil.ReadAll(resp.Body)
 
 	if err != nil {
@@ -476,6 +509,8 @@ func getStatus(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job str
 	if err != nil {
 		return "", "", err
 	}
+
+	defer resp.Body.Close()
 
 	body, err = ioutil.ReadAll(resp.Body)
 	if err != nil {
