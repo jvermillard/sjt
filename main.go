@@ -101,7 +101,7 @@ func main() {
 		for _, b := range builds {
 			branch, sha1, err := getGitInfo(jenkinsUrl, jenkinsUser, jenkinsPwd, job, b)
 			if err != nil {
-				fmt.Printf("Skipping: can't get job git commit status, job %d, error %q\n", job, err.Error())
+				fmt.Printf("Skipping: can't get job git commit status, build %d, error %q\n", b, err.Error())
 				continue
 			}
 
@@ -453,6 +453,8 @@ func listBuilds(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job st
 func getGitInfo(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job string, build int) (branch string, sha1 string, err error) {
 	dbg(jenkinsUrl + "/job/" + job + "/" + strconv.Itoa(build) + "/git/api/json\n")
 
+	// DAMN JENKINS I HATE YOU
+	time.Sleep(time.Duration(5) * time.Second)
 	resp, err := get(jenkinsUrl+"/job/"+job+"/"+strconv.Itoa(build)+"/git/api/json", jenkinsUser, jenkinsPwd)
 
 	if err != nil {
