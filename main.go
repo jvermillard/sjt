@@ -33,8 +33,8 @@ func main() {
 		debug = true
 	}
 
-	if len(os.Args) != 11 {
-		fmt.Errorf("Invalid number of arguments\nUsage : [stash url] [stash user] [stash password] [stash project] [stash repository] [jenkins url] [jenkins user] [jenkins password] [job] [job parameter]\n")
+	if len(os.Args) < 12 {
+		fmt.Errorf("Invalid number of arguments\nUsage : [stash url] [stash user] [stash password] [stash project] [stash repository] [jenkins url] [jenkins user] [jenkins password] [job] [job parameter] [s3 url prefix]\n")
 		os.Exit(1)
 	}
 	stashUrl := os.Args[1]
@@ -52,6 +52,12 @@ func main() {
 	job := os.Args[9]
 
 	parameter := os.Args[10]
+
+	s3prefix := "http://av-test-reports.s3-website-eu-west-1.amazonaws.com"
+
+	if len(os.Args) >= 12 {
+		s3prefix = os.Args[11]
+	}
 
 	var state struct {
 		// get the list of open pull requests
@@ -124,7 +130,7 @@ func main() {
 
 				if f {
 
-					err = postStatus(stashUrl+"/rest/", "api/1.0/projects/"+project+"/repos/"+repo+"/pull-requests/", stashUser, stashPwd, idPr, sha1, status, tests, b)
+					err = postStatus(stashUrl+"/rest/", "api/1.0/projects/"+project+"/repos/"+repo+"/pull-requests/", stashUser, stashPwd, idPr, sha1, status, tests, b, s3prefix)
 
 					if err != nil {
 						fmt.Printf("Skipping: can't post comment on stash, job %d, error %q\n", job, err.Error())
@@ -233,17 +239,17 @@ func main() {
 }
 
 // post the status comment in the stash pull request
-func postStatus(baseUrl string, prjUrl string, user string, password string, idPr int, sha1 string, status string, tests string, idBuild int) error {
+func postStatus(baseUrl string, prjUrl string, user string, password string, idPr int, sha1 string, status string, tests string, idBuild int, s3prefix string) error {
 	dbg("posting comment : Integration build result for PR " + strconv.Itoa(idPr) + " (commit: " + sha1 + ")\n status: " + status + " tests: " + tests + "\n")
 
-	buildStatus, err := postBuildStatus(baseUrl, user, password, sha1, idBuild)
+	buildStatus, err := postBuildStatus(baseUrl, user, password, sha1, idBuild, s3prefix)
 
 	if err != nil {
 		return err
 	}
 
 	req, err := http.NewRequest("POST", baseUrl+prjUrl+strconv.Itoa(idPr)+"/comments",
-		strings.NewReader("{ \"text\" : \"**Integration build result**\\n\\n * Build: **#"+strconv.Itoa(idBuild)+"**\\n\\n * Commit: **"+sha1+"**\\n\\n * Status: **"+buildStatus+"** \\n\\n * Tests: **"+tests+"**\\n\\n * Report: http://av-test-reports.s3-website-eu-west-1.amazonaws.com/"+strconv.Itoa(idBuild)+"/report.html \"}"))
+		strings.NewReader("{ \"text\" : \"**Integration build result**\\n\\n * Build: **#"+strconv.Itoa(idBuild)+"**\\n\\n * Commit: **"+sha1+"**\\n\\n * Status: **"+buildStatus+"** \\n\\n * Tests: **"+tests+"**\\n\\n * Report: "+s3prefix+"/"+strconv.Itoa(idBuild)+"/report.html \"}"))
 
 	if err != nil {
 		return err
@@ -279,17 +285,17 @@ func postStatus(baseUrl string, prjUrl string, user string, password string, idP
 	return err
 }
 
-func postBuildStatus(baseUrl string, user string, password string, sha1 string, idBuild int) (string, error) {
+func postBuildStatus(baseUrl string, user string, password string, sha1 string, idBuild int, s3prefix string) (string, error) {
 	// post the build status for the commit
 
-	resp, err := http.Get("http://s3-eu-west-1.amazonaws.com/av-test-reports/" + strconv.Itoa(idBuild) + "/stash-build-result.json")
+	resp, err := http.Get(s3prefix + "/" + strconv.Itoa(idBuild) + "/stash-build-result.json")
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		fmt.Println("URI : http://s3-eu-west-1.amazonaws.com/av-test-reports/"+strconv.Itoa(idBuild)+"/stash-build-result.json returned ", resp.Status)
+		fmt.Println("URI : ", s3prefix+"/"+strconv.Itoa(idBuild)+"/stash-build-result.json returned ", resp.Status)
 		//return "", errors.New(fmt.Sprint("statuscode: ", resp.StatusCode))
 		return "NOREPORT", nil
 	}
