@@ -107,9 +107,9 @@ func main() {
 
 			branch = strings.Replace(branch, "origin/", "", -1)
 
-			status, tests, err := getStatus(jenkinsUrl, jenkinsUser, jenkinsPwd, job, b)
+			status, err := getStatus(jenkinsUrl, jenkinsUser, jenkinsPwd, job, b)
 			if err != nil {
-				fmt.Printf("Skipping: can't get job tests status, job %d, error %q\n", job, err.Error())
+				fmt.Printf("Skipping: can't get job status, job %d, error %q\n", job, err.Error())
 				continue
 			}
 
@@ -118,7 +118,7 @@ func main() {
 				continue
 			}
 
-			dbg("job res: " + branch + " " + sha1 + " " + status + " " + tests + "\n")
+			dbg("job res: " + branch + " " + sha1 + " " + status + "\n")
 
 			// does the build was already reported?
 			_, found := state.CommentedBuilds[branch+"#"+sha1+"#"+strconv.Itoa(b)]
@@ -130,7 +130,7 @@ func main() {
 
 				if f {
 
-					err = postStatus(stashUrl+"/rest/", "api/1.0/projects/"+project+"/repos/"+repo+"/pull-requests/", stashUser, stashPwd, idPr, sha1, status, tests, b, s3prefix)
+					err = postStatus(stashUrl+"/rest/", "api/1.0/projects/"+project+"/repos/"+repo+"/pull-requests/", stashUser, stashPwd, idPr, sha1, status, b, s3prefix)
 
 					if err != nil {
 						fmt.Printf("Skipping: can't post comment on stash, job %d, error %q\n", job, err.Error())
@@ -239,8 +239,8 @@ func main() {
 }
 
 // post the status comment in the stash pull request
-func postStatus(baseUrl string, prjUrl string, user string, password string, idPr int, sha1 string, status string, tests string, idBuild int, s3prefix string) error {
-	dbg("posting comment : Integration build result for PR " + strconv.Itoa(idPr) + " (commit: " + sha1 + ")\n status: " + status + " tests: " + tests + "\n")
+func postStatus(baseUrl string, prjUrl string, user string, password string, idPr int, sha1 string, status string, idBuild int, s3prefix string) error {
+	dbg("posting comment : Integration build result for PR " + strconv.Itoa(idPr) + " (commit: " + sha1 + ")\n status: " + status + "\n")
 
 	buildStatus, err := postBuildStatus(baseUrl, user, password, sha1, idBuild, s3prefix)
 
@@ -249,7 +249,7 @@ func postStatus(baseUrl string, prjUrl string, user string, password string, idP
 	}
 
 	req, err := http.NewRequest("POST", baseUrl+prjUrl+strconv.Itoa(idPr)+"/comments",
-		strings.NewReader("{ \"text\" : \"**Integration build result**\\n\\n * Build: **#"+strconv.Itoa(idBuild)+"**\\n\\n * Commit: **"+sha1+"**\\n\\n * Status: **"+buildStatus+"** \\n\\n * Tests: **"+tests+"**\\n\\n * Report: "+s3prefix+"/"+strconv.Itoa(idBuild)+"/report.html \"}"))
+		strings.NewReader("{ \"text\" : \"**Integration build result**\\n\\n * Build: **#"+strconv.Itoa(idBuild)+"**\\n\\n * Commit: **"+sha1+"**\\n\\n * Status: **"+buildStatus+"** \\n\\n * Report: "+s3prefix+"/"+strconv.Itoa(idBuild)+"/report.html \"}"))
 
 	if err != nil {
 		return err
@@ -302,7 +302,7 @@ func postBuildStatus(baseUrl string, user string, password string, sha1 string, 
 
 	data, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return "ERR", err
 	}
 
 	// post that as commit build status
@@ -310,7 +310,7 @@ func postBuildStatus(baseUrl string, user string, password string, sha1 string, 
 	req, err := http.NewRequest("POST", baseUrl+"build-status/1.0/commits/"+sha1, bytes.NewReader(data))
 	if err != nil {
 		dbg("problem post build: %s\n", err.Error())
-		return "", err
+		return "ERR POST", err
 	}
 
 	req.Header.Add("Content-Type", "application/json")
@@ -326,24 +326,24 @@ func postBuildStatus(baseUrl string, user string, password string, sha1 string, 
 	resp, err = client.Do(req)
 
 	if err != nil {
-		return "", err
+		return "ERR HTTP POST", err
 	}
 	defer resp.Body.Close()
 
 	cnt, err := ioutil.ReadAll(resp.Body)
 
-	dbg("post commit status : " + resp.Status + "\n" + string(cnt) + "\n")
+	fmt.Println("post commit status : " + resp.Status + "\n" + string(cnt) + "\n")
 
 	// extract the status from the json
-	var status struct{ state string }
+	var status struct{ State string }
 
 	err = json.Unmarshal(data, &status)
 
 	if err != nil {
-		return "", err
+		return "ERR JSON", err
 	}
 
-	return status.state, nil
+	return status.State, nil
 }
 
 // get issue a get on the given url and return the http response and/or an error
@@ -486,11 +486,11 @@ func getGitInfo(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job st
 	return git.LastBuiltRevision.Branch[0].Name, git.LastBuiltRevision.Branch[0].SHA1, nil
 }
 
-func getStatus(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job string, build int) (status string, tests string, err error) {
+func getStatus(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job string, build int) (status string, err error) {
 	resp, err := get(jenkinsUrl+"/job/"+job+"/"+strconv.Itoa(build)+"/api/json", jenkinsUser, jenkinsPwd)
 
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 
 	defer resp.Body.Close()
@@ -498,46 +498,19 @@ func getStatus(jenkinsUrl string, jenkinsUser string, jenkinsPwd string, job str
 	body, err := ioutil.ReadAll(resp.Body)
 
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 
 	var result struct {
 		Result string
 	}
 
-	//fmt.Printf("RAW : %s\n", body)
-
 	err = json.Unmarshal(body, &result)
 
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 
-	resp, err = get(jenkinsUrl+"/job/"+job+"/"+strconv.Itoa(build)+"/testReport/api/json", jenkinsUser, jenkinsPwd)
-	if err != nil {
-		return "", "", err
-	}
+	return result.Result, nil
 
-	defer resp.Body.Close()
-
-	body, err = ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return "", "", err
-	}
-
-	if resp.StatusCode == 200 {
-		var testRes struct {
-			FailCount int
-			PassCount int
-			SkipCount int
-		}
-		err = json.Unmarshal(body, &testRes)
-		if err != nil {
-			return "", "", err
-		}
-		return result.Result, fmt.Sprintf("Fail: %d, Pass: %d, Skip: %d", testRes.FailCount, testRes.PassCount, testRes.SkipCount), nil
-	} else {
-		dbg("RAW JSON %s\n", body)
-		return result.Result, "tests not passed", nil
-	}
 }
