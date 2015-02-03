@@ -31,6 +31,9 @@ func main() {
 	dbgStr := os.Getenv("DEBUG")
 	if len(dbgStr) > 0 {
 		debug = true
+		fmt.Println("Debug mode activated")
+	} else {
+		fmt.Println("Silent mode activated")
 	}
 
 	if len(os.Args) < 12 {
