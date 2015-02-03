@@ -36,10 +36,11 @@ func main() {
 		fmt.Println("Silent mode activated")
 	}
 
-	if len(os.Args) < 12 {
-		fmt.Errorf("Invalid number of arguments\nUsage : [stash url] [stash user] [stash password] [stash project] [stash repository] [jenkins url] [jenkins user] [jenkins password] [job] [job parameter] [s3 url prefix]\n")
+	if len(os.Args) < 11 || len(os.Args) > 12 {
+		fmt.Println("Invalid number of arguments\nUsage : [stash url] [stash user] [stash password] [stash project] [stash repository] [jenkins url] [jenkins user] [jenkins password] [job] [job parameter] [s3 url prefix]\n")
 		os.Exit(1)
 	}
+
 	stashUrl := os.Args[1]
 	stashUser := os.Args[2]
 	stashPwd := os.Args[3]
@@ -58,7 +59,7 @@ func main() {
 
 	s3prefix := "http://av-test-reports.s3-website-eu-west-1.amazonaws.com"
 
-	if len(os.Args) >= 12 {
+	if len(os.Args) == 12 {
 		s3prefix = os.Args[11]
 	}
 
