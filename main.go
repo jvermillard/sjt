@@ -20,7 +20,7 @@ var debug bool = false
 
 func dbg(text string, args ...interface{}) {
 	if debug {
-		fmt.Printf(text, args)
+		fmt.Printf(text, args...)
 	}
 }
 func main() {
