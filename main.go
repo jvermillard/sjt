@@ -109,7 +109,7 @@ func main() {
 				continue
 			}
 
-			branch = strings.Replace(branch, "origin/", "", -1)
+			branch = strings.Split(branch, "origin/")[1]
 
 			status, err := getStatus(jenkinsUrl, jenkinsUser, jenkinsPwd, job, b)
 			if err != nil {
